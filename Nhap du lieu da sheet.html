@@ -1,0 +1,1704 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trình Quản Lý Dữ Liệu Excel Theo Sheet</title>
+
+  <!-- Tải Tailwind CSS qua CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Tải thư viện SheetJS (XLSX) để đọc và xuất file Excel/CSV -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+  <!-- Phông chữ Inter hỗ trợ tiếng Việt rõ nét -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <script>
+    // Cấu hình Tailwind với font Inter và màu chủ đạo tinh tế
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    /* Tùy chỉnh thanh cuộn mảnh, gọn gàng trên màn hình */
+    ::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    /* Hiệu ứng xuất hiện mượt mà cho toast và modal */
+    @keyframes fadeInScale {
+      from {
+        opacity: 0;
+        transform: scale(0.97) translateY(4px);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+    .modal-animate {
+      animation: fadeInScale 0.16s ease-out forwards;
+    }
+
+    /* Cấu hình in dữ liệu chuyên nghiệp trên khổ giấy A4 */
+    @media print {
+      @page {
+        size: A4 landscape;
+        margin: 12mm;
+      }
+
+      html, body {
+        background: #ffffff !important;
+        color: #000000 !important;
+        font-size: 11pt !important;
+        overflow: visible !important;
+        height: auto !important;
+      }
+
+      /* Ẩn các thành phần điều hướng, nút bấm, tìm kiếm, toast, modal */
+      .no-print,
+      #sidebar,
+      #mobile-sidebar-backdrop,
+      #top-header,
+      #toolbar-section,
+      #toast-container,
+      #crud-modal,
+      #confirm-modal,
+      .col-select,
+      .col-actions {
+        display: none !important;
+      }
+
+      /* Mở rộng vùng nội dung chính ra toàn bộ trang in */
+      #app-shell {
+        display: block !important;
+        height: auto !important;
+        overflow: visible !important;
+      }
+
+      #main-content-wrapper {
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        overflow: visible !important;
+      }
+
+      #workspace-scroll {
+        padding: 0 !important;
+        overflow: visible !important;
+      }
+
+      /* Hiển thị tiêu đề trang in rõ ràng */
+      #print-header {
+        display: block !important;
+        margin-bottom: 14px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #1e293b;
+      }
+
+      /* Định dạng bảng in sắc nét, không vỡ dòng giữa chừng */
+      #data-table-card {
+        box-shadow: none !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 0 !important;
+      }
+
+      #data-table-wrapper {
+        overflow: visible !important;
+        max-height: none !important;
+      }
+
+      table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        font-size: 10pt !important;
+      }
+
+      thead {
+        display: table-header-group;
+      }
+
+      tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+
+      th, td {
+        border: 1px solid #94a3b8 !important;
+        padding: 6px 8px !important;
+        color: #000000 !important;
+        background: #ffffff !important;
+        white-space: normal !important;
+        word-break: break-word !important;
+      }
+
+      th {
+        background-color: #f1f5f9 !important;
+        font-weight: 700 !important;
+      }
+    }
+  </style>
+</head>
+
+<body class="bg-slate-50 text-slate-800 antialiased selection:bg-brand-100 selection:text-brand-700">
+  <!-- Input ẩn chọn file Excel/CSV -->
+  <input
+    type="file"
+    id="excel-file-input"
+    accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+    class="hidden"
+  />
+
+  <!-- Khung chứa thông báo Toast góc trên bên phải -->
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2.5 max-w-sm w-full pointer-events-none"></div>
+
+  <!-- Lớp nền mờ cho sidebar trên thiết bị di động -->
+  <div
+    id="mobile-sidebar-backdrop"
+    onclick="toggleMobileSidebar(false)"
+    class="fixed inset-0 z-30 bg-slate-900/50 backdrop-blur-xs hidden lg:hidden transition-opacity"
+  ></div>
+
+  <!-- Khung ứng dụng chính -->
+  <div id="app-shell" class="min-h-screen lg:h-screen flex lg:overflow-hidden">
+
+    <!-- ==================== SIDEBAR BÊN TRÁI (DANH SÁCH SHEET) ==================== -->
+    <aside
+      id="sidebar"
+      class="fixed lg:static inset-y-0 left-0 z-40 w-72 sm:w-80 shrink-0 bg-white border-r border-slate-200 flex flex-col transform -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-out"
+    >
+      <!-- Logo & Tên ứng dụng -->
+      <div class="h-16 px-4 border-b border-slate-200 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-9 h-9 rounded-xl bg-brand-600 text-white flex items-center justify-center shadow-sm shrink-0">
+            <!-- Biểu tượng bảng tính SVG -->
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5A2.5 2.5 0 015.5 5h13A2.5 2.5 0 0121 7.5v9a2.5 2.5 0 01-2.5 2.5h-13A2.5 2.5 0 013 16.5v-9z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 10.5h18M9.5 10.5v8.5M15 10.5v8.5" />
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <h1 class="text-sm font-bold text-slate-900 truncate">SheetMaster Excel</h1>
+            <p class="text-[11px] text-slate-500 truncate">Quản lý dữ liệu đa sheet</p>
+          </div>
+        </div>
+
+        <!-- Nút đóng sidebar trên mobile -->
+        <button
+          type="button"
+          onclick="toggleMobileSidebar(false)"
+          class="lg:hidden p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+          aria-label="Đóng menu"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Thông tin file hiện tại & nút tải file mới -->
+      <div class="p-3.5 border-b border-slate-100 bg-slate-50/70 space-y-2.5">
+        <div id="loaded-file-summary" class="hidden rounded-xl bg-white border border-slate-200 p-2.5">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <p class="text-[11px] font-medium uppercase tracking-wider text-slate-400">File đang mở</p>
+              <p id="sidebar-file-name" class="text-xs font-semibold text-slate-800 truncate mt-0.5" title=""></p>
+            </div>
+            <span id="sidebar-sheet-total" class="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-brand-50 text-brand-700">
+              0 sheet
+            </span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onclick="triggerFilePicker()"
+          class="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-semibold bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white shadow-xs transition cursor-pointer"
+        >
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+          </svg>
+          <span>Tải file Excel / CSV</span>
+        </button>
+      </div>
+
+      <!-- Tiêu đề danh sách sheet -->
+      <div class="px-4 pt-3.5 pb-1.5 flex items-center justify-between">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Danh sách Sheet</span>
+        <span id="sidebar-total-rows-badge" class="text-[11px] font-medium text-slate-500">0 dòng</span>
+      </div>
+
+      <!-- Vùng danh sách menu sheet tự động sinh -->
+      <nav id="sheet-menu-list" class="flex-1 overflow-y-auto px-3 py-2 space-y-1" aria-label="Danh sách các sheet">
+        <div class="text-center py-10 px-4">
+          <div class="w-11 h-11 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2.5">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p class="text-xs font-medium text-slate-600">Chưa có sheet nào</p>
+          <p class="text-[11px] text-slate-400 mt-1">Tải file Excel hoặc tạo dữ liệu mẫu để sinh menu sheet tự động.</p>
+        </div>
+      </nav>
+
+      <!-- Chân sidebar: nút xuất file Excel & tạo dữ liệu mẫu -->
+      <div class="p-3 border-t border-slate-200 bg-slate-50/80 space-y-2">
+        <button
+          type="button"
+          id="btn-export-workbook"
+          onclick="exportWorkbookToExcel()"
+          disabled
+          class="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold border border-emerald-600/30 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:border-slate-200 disabled:text-slate-400 text-white transition cursor-pointer disabled:cursor-not-allowed"
+        >
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <span>Xuất tất cả sheet (.xlsx)</span>
+        </button>
+
+        <button
+          type="button"
+          onclick="loadSampleWorkbook()"
+          class="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50/70 transition cursor-pointer"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+          </svg>
+          <span>Nạp dữ liệu mẫu nhiều sheet</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ==================== KHU VỰC NỘI DUNG CHÍNH BÊN PHẢI ==================== -->
+    <div id="main-content-wrapper" class="flex-1 flex flex-col min-w-0 lg:overflow-hidden">
+
+      <!-- Thanh Header trên cùng -->
+      <header id="top-header" class="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-3 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+          <!-- Nút mở menu sidebar trên mobile -->
+          <button
+            type="button"
+            onclick="toggleMobileSidebar(true)"
+            class="lg:hidden p-2 -ml-1 rounded-xl text-slate-600 hover:bg-slate-100 transition"
+            aria-label="Mở danh sách sheet"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <h2 id="active-sheet-heading" class="text-base sm:text-lg font-bold text-slate-900 truncate">
+                Chào mừng bạn đến với SheetMaster
+              </h2>
+              <span
+                id="active-sheet-badge"
+                class="hidden sm:inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600"
+              >
+                Sẵn sàng
+              </span>
+            </div>
+            <p id="active-sheet-subtitle" class="text-xs text-slate-500 truncate">
+              Tải file Excel (.xlsx, .xls, .csv) để bắt đầu xem, thêm, sửa, xoá và in dữ liệu từng sheet
+            </p>
+          </div>
+        </div>
+
+        <!-- Các nút thao tác nhanh khi đang có sheet -->
+        <div id="header-quick-actions" class="hidden items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onclick="printCurrentSheet()"
+            class="inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs transition cursor-pointer"
+          >
+            <svg class="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            <span>In dữ liệu</span>
+          </button>
+
+          <button
+            type="button"
+            onclick="openCreateRowModal()"
+            class="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white shadow-xs transition cursor-pointer"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            <span>Thêm dòng</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Vùng làm việc chính có thể cuộn -->
+      <main id="workspace-scroll" class="flex-1 overflow-y-auto p-4 sm:p-6">
+
+        <!-- ==================== MÀN HÌNH CHÀO MỪNG & KÉO THẢ FILE ==================== -->
+        <section id="welcome-view" class="max-w-4xl mx-auto py-4 sm:py-8">
+          <div
+            id="dropzone-card"
+            ondragover="handleDragOver(event)"
+            ondragleave="handleDragLeave(event)"
+            ondrop="handleFileDrop(event)"
+            class="bg-white border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-2xl p-6 sm:p-10 text-center transition-all shadow-xs"
+          >
+            <div class="w-16 h-16 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center mx-auto mb-4">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+            </div>
+
+            <h3 class="text-xl sm:text-2xl font-bold text-slate-900">
+              Kéo &amp; thả file Excel vào đây hoặc chọn từ máy tính
+            </h3>
+            <p class="text-sm text-slate-500 max-w-xl mx-auto mt-2">
+              Hệ thống tự động quét tất cả các sheet trong file <span class="font-semibold text-slate-700">.xlsx, .xls, .csv</span>, tạo menu bên trái để bạn chuyển đổi nhanh và thao tác đầy đủ <span class="font-semibold text-slate-700">Xem – Thêm – Sửa – Xoá – In</span>.
+            </p>
+
+            <div class="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                onclick="triggerFilePicker()"
+                class="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white shadow-sm transition cursor-pointer"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <span>Chọn file từ thiết bị</span>
+              </button>
+
+              <button
+                type="button"
+                onclick="loadSampleWorkbook()"
+                class="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+              >
+                <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Dùng thử dữ liệu mẫu (3 Sheet)</span>
+              </button>
+            </div>
+
+            <p class="text-xs text-slate-400 mt-4">
+              Xử lý trực tiếp trên trình duyệt — dữ liệu của bạn không bị gửi lên máy chủ bên ngoài.
+            </p>
+          </div>
+
+          <!-- Thẻ hướng dẫn nhanh 4 tính năng chính -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+              <div class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm mb-2.5">1</div>
+              <h4 class="text-sm font-semibold text-slate-900">Menu theo Sheet</h4>
+              <p class="text-xs text-slate-500 mt-1">Tự động nhận diện từng sheet và hiển thị số lượng dòng ở menu trái.</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+              <div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-sm mb-2.5">2</div>
+              <h4 class="text-sm font-semibold text-slate-900">Thêm &amp; Sửa linh hoạt</h4>
+              <p class="text-xs text-slate-500 mt-1">Tạo dòng mới hoặc chỉnh sửa từng ô/dòng theo đúng cấu trúc cột của sheet.</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+              <div class="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-sm mb-2.5">3</div>
+              <h4 class="text-sm font-semibold text-slate-900">Xoá đơn lẻ hoặc hàng loạt</h4>
+              <p class="text-xs text-slate-500 mt-1">Chọn nhiều dòng bằng checkbox để xoá nhanh hoặc xoá từng dòng có xác nhận.</p>
+            </div>
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+              <div class="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-sm mb-2.5">4</div>
+              <h4 class="text-sm font-semibold text-slate-900">In &amp; Xuất Excel</h4>
+              <p class="text-xs text-slate-500 mt-1">In sheet hiện tại chuẩn khổ ngang A4 hoặc xuất toàn bộ thay đổi ra .xlsx.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== KHÔNG GIAN LÀM VIỆC CỦA SHEET ĐANG CHỌN ==================== -->
+        <section id="sheet-workspace" class="hidden space-y-4">
+
+          <!-- Tiêu đề riêng chỉ xuất hiện khi In (@media print) -->
+          <div id="print-header" class="hidden">
+            <h1 id="print-sheet-title" class="text-xl font-bold text-black"></h1>
+            <p id="print-meta-info" class="text-xs text-slate-700 mt-1"></p>
+          </div>
+
+          <!-- Thanh công cụ tìm kiếm, thêm cột, xoá nhiều dòng & thống kê -->
+          <div id="toolbar-section" class="bg-white rounded-2xl border border-slate-200 p-3.5 sm:p-4 shadow-2xs">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+
+              <!-- Ô tìm kiếm nhanh theo từ khóa -->
+              <div class="relative flex-1 max-w-md">
+                <svg class="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  type="text"
+                  id="search-input"
+                  oninput="handleSearchChange(this.value)"
+                  placeholder="Tìm kiếm từ khóa trong sheet hiện tại..."
+                  class="w-full pl-10 pr-8 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 text-sm text-slate-800 placeholder:text-slate-400 outline-none transition"
+                />
+                <button
+                  type="button"
+                  id="clear-search-btn"
+                  onclick="clearSearch()"
+                  class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                  title="Xoá từ khoá"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <!-- Nhóm nút thao tác dữ liệu -->
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  id="btn-delete-selected"
+                  onclick="confirmDeleteSelectedRows()"
+                  disabled
+                  class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-40 disabled:pointer-events-none text-rose-700 transition cursor-pointer"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  <span>Xoá đã chọn (<span id="selected-count-label">0</span>)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onclick="openAddColumnModal()"
+                  class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer"
+                  title="Thêm một cột mới vào sheet hiện tại"
+                >
+                  <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                  </svg>
+                  <span>+ Cột</span>
+                </button>
+
+                <button
+                  type="button"
+                  onclick="openCreateRowModal()"
+                  class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white shadow-2xs transition cursor-pointer"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>Thêm dòng mới</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Thanh thống kê bản ghi -->
+            <div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+              <div class="flex items-center gap-3">
+                <span>Hiển thị: <strong id="filtered-count-label" class="text-slate-800">0</strong> / <strong id="total-sheet-rows-label" class="text-slate-800">0</strong> dòng</span>
+                <span class="hidden sm:inline text-slate-300">•</span>
+                <span class="hidden sm:inline">Số cột: <strong id="total-sheet-cols-label" class="text-slate-800">0</strong></span>
+              </div>
+              <p class="text-[11px] text-slate-400">
+                Mẹo: Nhấn nút <strong>Sửa</strong> trên từng dòng để cập nhật dữ liệu hoặc nhấn <strong>In dữ liệu</strong> để in sheet này.
+              </p>
+            </div>
+          </div>
+
+          <!-- Bảng dữ liệu chính -->
+          <div id="data-table-card" class="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+            <div id="data-table-wrapper" class="overflow-x-auto max-h-[calc(100vh-270px)] overflow-y-auto">
+              <table id="sheet-data-table" class="w-full text-left border-collapse">
+                <thead id="sheet-table-head" class="bg-slate-50 sticky top-0 z-10 border-b border-slate-200"></thead>
+                <tbody id="sheet-table-body" class="divide-y divide-slate-100 text-sm text-slate-700"></tbody>
+              </table>
+            </div>
+
+            <!-- Trạng thái rỗng khi sheet chưa có dòng hoặc tìm kiếm không khớp -->
+            <div id="empty-table-state" class="hidden py-14 px-6 text-center">
+              <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                </svg>
+              </div>
+              <p id="empty-table-title" class="text-sm font-semibold text-slate-700">Chưa có dữ liệu trong sheet này</p>
+              <p id="empty-table-desc" class="text-xs text-slate-500 mt-1">Bạn có thể nhấn "Thêm dòng mới" để bắt đầu nhập bản ghi đầu tiên.</p>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL THÊM / SỬA DÒNG HOẶC THÊM CỘT ==================== -->
+  <div
+    id="crud-modal"
+    class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="modal-animate bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <h3 id="crud-modal-title" class="text-base font-bold text-slate-900">Thêm dòng mới</h3>
+          <p id="crud-modal-subtitle" class="text-xs text-slate-500 mt-0.5"></p>
+        </div>
+        <button
+          type="button"
+          onclick="closeCrudModal()"
+          class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+          aria-label="Đóng hộp thoại"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <form id="crud-modal-form" onsubmit="handleCrudFormSubmit(event)" class="p-5 overflow-y-auto space-y-3.5 flex-1">
+        <div id="crud-modal-fields" class="grid grid-cols-1 sm:grid-cols-2 gap-3.5"></div>
+      </form>
+
+      <div class="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+        <button
+          type="button"
+          onclick="closeCrudModal()"
+          class="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition cursor-pointer"
+        >
+          Huỷ bỏ
+        </button>
+        <button
+          type="submit"
+          form="crud-modal-form"
+          id="crud-modal-submit-btn"
+          class="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white shadow-xs transition cursor-pointer"
+        >
+          Lưu dữ liệu
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL XÁC NHẬN XOÁ GỌN GÀNG ==================== -->
+  <div
+    id="confirm-modal"
+    class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="modal-animate bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md overflow-hidden">
+      <div class="p-5">
+        <div class="w-11 h-11 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-3.5">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h3 id="confirm-modal-title" class="text-base font-bold text-slate-900">Xác nhận xoá dữ liệu</h3>
+        <p id="confirm-modal-message" class="text-sm text-slate-500 mt-1.5 leading-relaxed"></p>
+      </div>
+      <div class="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+        <button
+          type="button"
+          onclick="closeConfirmModal()"
+          class="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition cursor-pointer"
+        >
+          Huỷ
+        </button>
+        <button
+          type="button"
+          id="confirm-modal-action-btn"
+          class="px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition cursor-pointer"
+        >
+          Xác nhận xoá
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== LOGIC ỨNG DỤNG JAVASCRIPT ==================== -->
+  <script>
+    /**
+     * Trạng thái toàn cục của ứng dụng:
+     * - fileName: Tên file Excel/CSV đang mở
+     * - sheets: Mảng các object sheet: { name: string, columns: string[], rows: Array<{ _id: number, values: Record<string, string> }> }
+     * - activeSheetName: Tên sheet hiện đang được chọn trên menu trái
+     * - searchQuery: Từ khoá lọc hiện tại
+     * - selectedRowIds: Set chứa _id của các dòng được chọn bằng checkbox trong sheet hiện tại
+     * - rowIdCounter: Bộ đếm ID nội bộ duy nhất cho từng dòng để thao tác sửa/xoá chính xác
+     * - modalState: Lưu ngữ cảnh hiện tại của modal ('create-row' | 'edit-row' | 'add-column') và rowId đang sửa
+     * - pendingConfirmCallback: Hàm thực thi khi người dùng nhấn xác nhận trong modal xoá
+     */
+    const state = {
+      fileName: '',
+      sheets: [],
+      activeSheetName: null,
+      searchQuery: '',
+      selectedRowIds: new Set(),
+      rowIdCounter: 1,
+      modalState: {
+        mode: null,
+        targetRowId: null,
+      },
+      pendingConfirmCallback: null,
+    };
+
+    // Gắn sự kiện chọn file khi DOM sẵn sàng
+    document.addEventListener('DOMContentLoaded', () => {
+      const fileInput = document.getElementById('excel-file-input');
+      fileInput.addEventListener('change', (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (file) {
+          processUploadedFile(file);
+        }
+        // Reset giá trị input để lần sau chọn lại cùng 1 file vẫn kích hoạt sự kiện change
+        event.target.value = '';
+      });
+
+      // Hỗ trợ phím ESC để đóng các modal đang mở
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          closeCrudModal();
+          closeConfirmModal();
+        }
+      });
+    });
+
+    /* -------------------- TIỆN ÍCH THÔNG BÁO (TOAST) -------------------- */
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+
+      const styles = {
+        success: {
+          bg: 'bg-emerald-50 border-emerald-200 text-emerald-900',
+          iconColor: 'text-emerald-600',
+          icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />`,
+        },
+        error: {
+          bg: 'bg-rose-50 border-rose-200 text-rose-900',
+          iconColor: 'text-rose-600',
+          icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />`,
+        },
+        warning: {
+          bg: 'bg-amber-50 border-amber-200 text-amber-900',
+          iconColor: 'text-amber-600',
+          icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />`,
+        },
+        info: {
+          bg: 'bg-indigo-50 border-indigo-200 text-indigo-900',
+          iconColor: 'text-indigo-600',
+          icon: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />`,
+        },
+      };
+
+      const cfg = styles[type] || styles.info;
+      const toast = document.createElement('div');
+      toast.className = `modal-animate pointer-events-auto flex items-start gap-2.5 px-4 py-3 rounded-xl border shadow-md text-xs sm:text-sm font-medium ${cfg.bg}`;
+      toast.innerHTML = `
+        <svg class="w-5 h-5 shrink-0 mt-0.5 ${cfg.iconColor}" fill="none" stroke="currentColor" viewBox="0 0 24 24">${cfg.icon}</svg>
+        <span class="flex-1 leading-snug">${escapeHtml(message)}</span>
+      `;
+
+      container.appendChild(toast);
+
+      // Tự động ẩn sau 3.4 giây
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-4px)';
+        toast.style.transition = 'all 0.2s ease';
+        setTimeout(() => toast.remove(), 220);
+      }, 3400);
+    }
+
+    /* -------------------- ĐIỀU KHIỂN SIDEBAR MOBILE -------------------- */
+    function toggleMobileSidebar(forceOpen) {
+      const sidebar = document.getElementById('sidebar');
+      const backdrop = document.getElementById('mobile-sidebar-backdrop');
+      if (!sidebar || !backdrop) return;
+
+      const isCurrentlyOpen = !sidebar.classList.contains('-translate-x-full');
+      const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !isCurrentlyOpen;
+
+      if (shouldOpen) {
+        sidebar.classList.remove('-translate-x-full');
+        backdrop.classList.remove('hidden');
+      } else {
+        sidebar.classList.add('-translate-x-full');
+        backdrop.classList.add('hidden');
+      }
+    }
+
+    /* -------------------- CHỌN & KÉO THẢ FILE EXCEL -------------------- */
+    function triggerFilePicker() {
+      const input = document.getElementById('excel-file-input');
+      if (input) input.click();
+    }
+
+    function handleDragOver(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const card = document.getElementById('dropzone-card');
+      if (card) {
+        card.classList.add('border-brand-600', 'bg-brand-50/40');
+      }
+    }
+
+    function handleDragLeave(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      const card = document.getElementById('dropzone-card');
+      if (card) {
+        card.classList.remove('border-brand-600', 'bg-brand-50/40');
+      }
+    }
+
+    function handleFileDrop(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      handleDragLeave(event);
+
+      const files = event.dataTransfer && event.dataTransfer.files;
+      if (!files || files.length === 0) return;
+
+      const file = files[0];
+      const validExt = /\.(xlsx|xls|csv)$/i.test(file.name);
+      if (!validExt) {
+        showToast('Vui lòng chọn file định dạng .xlsx, .xls hoặc .csv', 'warning');
+        return;
+      }
+
+      processUploadedFile(file);
+    }
+
+    /**
+     * Đọc file Excel/CSV bằng SheetJS và chuyển đổi toàn bộ các sheet thành cấu trúc chuẩn
+     */
+    function processUploadedFile(file) {
+      if (typeof XLSX === 'undefined') {
+        showToast('Không thể tải thư viện đọc Excel (SheetJS). Vui lòng kiểm tra kết nối mạng.', 'error');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+
+          if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+            showToast('File không chứa sheet dữ liệu nào.', 'error');
+            return;
+          }
+
+          const parsedSheets = workbook.SheetNames.map((sheetName) => {
+            const worksheet = workbook.Sheets[sheetName];
+            // Đọc dưới dạng mảng 2 chiều (header: 1) để giữ nguyên cấu trúc cột kể cả sheet trống hoặc ít cột
+            const matrix = XLSX.utils.sheet_to_json(worksheet, {
+              header: 1,
+              defval: '',
+              raw: false,
+            });
+
+            return buildSheetModel(sheetName, matrix);
+          });
+
+          state.fileName = file.name;
+          state.sheets = parsedSheets;
+          state.activeSheetName = parsedSheets[0].name;
+          state.searchQuery = '';
+          state.selectedRowIds.clear();
+
+          const searchInput = document.getElementById('search-input');
+          if (searchInput) searchInput.value = '';
+          updateClearSearchButton();
+
+          renderAllUI();
+          toggleMobileSidebar(false);
+          showToast(
+            `Đã tải "${file.name}" với ${parsedSheets.length} sheet (${parsedSheets.map((s) => s.name).join(', ')}).`,
+            'success'
+          );
+        } catch (err) {
+          console.error('Lỗi đọc file Excel:', err);
+          showToast('Có lỗi khi đọc file Excel. Vui lòng kiểm tra lại cấu trúc file.', 'error');
+        }
+      };
+
+      reader.onerror = () => {
+        showToast('Không thể đọc file từ thiết bị của bạn.', 'error');
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    /**
+     * Chuẩn hoá dữ liệu ma trận 2 chiều của một sheet thành { name, columns, rows }
+     */
+    function buildSheetModel(sheetName, matrix) {
+      if (!Array.isArray(matrix) || matrix.length === 0) {
+        return {
+          name: sheetName,
+          columns: ['Cột 1', 'Cột 2', 'Cột 3'],
+          rows: [],
+        };
+      }
+
+      // Tìm dòng tiêu đề đầu tiên có nội dung, nếu không có thì sinh cột mặc định
+      let headerRowIndex = matrix.findIndex((r) =>
+        Array.isArray(r) && r.some((cell) => String(cell ?? '').trim() !== '')
+      );
+
+      if (headerRowIndex === -1) {
+        return {
+          name: sheetName,
+          columns: ['Cột 1', 'Cột 2', 'Cột 3'],
+          rows: [],
+        };
+      }
+
+      const rawHeaders = matrix[headerRowIndex];
+      // Xác định độ dài tối đa của các dòng để không mất dữ liệu ở cột phía sau
+      const maxCols = matrix.reduce(
+        (max, r) => Math.max(max, Array.isArray(r) ? r.length : 0),
+        rawHeaders.length
+      );
+
+      const usedNames = new Map();
+      const columns = [];
+      for (let c = 0; c < maxCols; c++) {
+        const rawLabel = rawHeaders[c] !== undefined ? String(rawHeaders[c]).trim() : '';
+        let baseName = rawLabel || `Cột ${c + 1}`;
+        const count = usedNames.get(baseName) || 0;
+        usedNames.set(baseName, count + 1);
+        if (count > 0) {
+          baseName = `${baseName} (${count + 1})`;
+        }
+        columns.push(baseName);
+      }
+
+      const rows = [];
+      for (let r = headerRowIndex + 1; r < matrix.length; r++) {
+        const rowArr = Array.isArray(matrix[r]) ? matrix[r] : [];
+        // Bỏ qua hoàn toàn các dòng trống trơn
+        const hasAnyValue = rowArr.some((cell) => String(cell ?? '').trim() !== '');
+        if (!hasAnyValue) continue;
+
+        const values = {};
+        columns.forEach((colName, idx) => {
+          const cellVal = rowArr[idx];
+          values[colName] = cellVal === undefined || cellVal === null ? '' : String(cellVal);
+        });
+
+        rows.push({
+          _id: state.rowIdCounter++,
+          values,
+        });
+      }
+
+      return {
+        name: sheetName,
+        columns,
+        rows,
+      };
+    }
+
+    /* -------------------- DỮ LIỆU MẪU NHIỀU SHEET ĐỂ TEST NHANH -------------------- */
+    function loadSampleWorkbook() {
+      const sampleSheets = [
+        buildSheetModel('Nhân Sự', [
+          ['Mã NV', 'Họ và Tên', 'Phòng Ban', 'Chức Vụ', 'Email', 'Trạng Thái'],
+          ['NV001', 'Nguyễn Minh Anh', 'Kinh Doanh', 'Trưởng nhóm', 'anh.nm@congty.vn', 'Đang làm việc'],
+          ['NV002', 'Trần Thu Thảo', 'Kế Toán', 'Kế toán tổng hợp', 'thao.tt@congty.vn', 'Đang làm việc'],
+          ['NV003', 'Lê Hoàng Nam', 'Kỹ Thuật', 'Lập trình viên', 'nam.lh@congty.vn', 'Đang làm việc'],
+          ['NV004', 'Phạm Gia Huy', 'Marketing', 'Chuyên viên SEO', 'huy.pg@congty.vn', 'Nghỉ phép'],
+          ['NV005', 'Võ Ngọc Lan', 'Nhân Sự', 'Chuyên viên C&B', 'lan.vn@congty.vn', 'Đang làm việc'],
+        ]),
+        buildSheetModel('Sản Phẩm', [
+          ['Mã SP', 'Tên Sản Phẩm', 'Danh Mục', 'Đơn Giá (VNĐ)', 'Tồn Kho'],
+          ['SP101', 'Bàn phím cơ không dây Keychron', 'Phụ kiện', '2.150.000', '34'],
+          ['SP102', 'Màn hình LG UltraFine 27"', 'Màn hình', '7.890.000', '12'],
+          ['SP103', 'Chuột công thái học Logitech', 'Phụ kiện', '1.650.000', '58'],
+          ['SP104', 'Tai nghe chống ồn Sony WH', 'Âm thanh', '6.400.000', '19'],
+        ]),
+        buildSheetModel('Đơn Hàng Tháng 11', [
+          ['Mã Đơn', 'Khách Hàng', 'Ngày Đặt', 'Tổng Tiền', 'Thanh Toán'],
+          ['DH-2026-01', 'Công ty TNHH Ánh Dương', '2026-11-04', '15.780.000', 'Đã thanh toán'],
+          ['DH-2026-02', 'Nguyễn Quốc Bảo', '2026-11-11', '3.800.000', 'Đã thanh toán'],
+          ['DH-2026-03', 'Công ty CP Sao Mai', '2026-11-18', '25.600.000', 'Chờ đối soát'],
+          ['DH-2026-04', 'Đặng Thị Mỹ Duyên', '2026-11-22', '6.400.000', 'Đã thanh toán'],
+        ]),
+      ];
+
+      state.fileName = 'Du_Lieu_Mau_Da_Sheet.xlsx';
+      state.sheets = sampleSheets;
+      state.activeSheetName = sampleSheets[0].name;
+      state.searchQuery = '';
+      state.selectedRowIds.clear();
+
+      const searchInput = document.getElementById('search-input');
+      if (searchInput) searchInput.value = '';
+      updateClearSearchButton();
+
+      renderAllUI();
+      toggleMobileSidebar(false);
+      showToast('Đã nạp bộ dữ liệu mẫu gồm 3 sheet: Nhân Sự, Sản Phẩm, Đơn Hàng Tháng 11.', 'success');
+    }
+
+    /* -------------------- LẤY SHEET HIỆN TẠI & LỌC DỮ LIỆU -------------------- */
+    function getActiveSheet() {
+      return state.sheets.find((s) => s.name === state.activeSheetName) || null;
+    }
+
+    function selectSheet(sheetName) {
+      const target = state.sheets.find((s) => s.name === sheetName);
+      if (!target) return;
+
+      state.activeSheetName = target.name;
+      state.selectedRowIds.clear();
+      renderAllUI();
+      toggleMobileSidebar(false);
+    }
+
+    function getFilteredRows(sheet) {
+      if (!sheet) return [];
+      const q = state.searchQuery.trim().toLowerCase();
+      if (!q) return sheet.rows;
+
+      return sheet.rows.filter((row) =>
+        sheet.columns.some((col) => String(row.values[col] ?? '').toLowerCase().includes(q))
+      );
+    }
+
+    /* -------------------- RENDER TOÀN BỘ GIAO DIỆN -------------------- */
+    function renderAllUI() {
+      const hasData = state.sheets.length > 0;
+      const welcomeView = document.getElementById('welcome-view');
+      const sheetWorkspace = document.getElementById('sheet-workspace');
+      const headerQuickActions = document.getElementById('header-quick-actions');
+      const exportBtn = document.getElementById('btn-export-workbook');
+      const fileSummary = document.getElementById('loaded-file-summary');
+
+      renderSidebarMenu();
+
+      if (!hasData) {
+        welcomeView.classList.remove('hidden');
+        sheetWorkspace.classList.add('hidden');
+        headerQuickActions.classList.add('hidden');
+        headerQuickActions.classList.remove('flex');
+        exportBtn.disabled = true;
+        fileSummary.classList.add('hidden');
+
+        document.getElementById('active-sheet-heading').textContent = 'Chào mừng bạn đến với SheetMaster';
+        document.getElementById('active-sheet-subtitle').textContent =
+          'Tải file Excel (.xlsx, .xls, .csv) để bắt đầu xem, thêm, sửa, xoá và in dữ liệu từng sheet';
+        document.getElementById('active-sheet-badge').classList.add('hidden');
+        return;
+      }
+
+      // Đảm bảo luôn có sheet đang chọn hợp lệ
+      if (!getActiveSheet()) {
+        state.activeSheetName = state.sheets[0].name;
+      }
+
+      const activeSheet = getActiveSheet();
+      welcomeView.classList.add('hidden');
+      sheetWorkspace.classList.remove('hidden');
+      headerQuickActions.classList.remove('hidden');
+      headerQuickActions.classList.add('flex');
+      exportBtn.disabled = false;
+
+      // Cập nhật thông tin file trên sidebar
+      fileSummary.classList.remove('hidden');
+      const fileNameEl = document.getElementById('sidebar-file-name');
+      fileNameEl.textContent = state.fileName;
+      fileNameEl.title = state.fileName;
+      document.getElementById('sidebar-sheet-total').textContent = `${state.sheets.length} sheet`;
+
+      // Cập nhật header trên cùng theo sheet hiện tại
+      document.getElementById('active-sheet-heading').textContent = activeSheet.name;
+      document.getElementById('active-sheet-subtitle').textContent =
+        `File: ${state.fileName} • Đang thao tác trên sheet "${activeSheet.name}"`;
+      const badge = document.getElementById('active-sheet-badge');
+      badge.textContent = `${activeSheet.rows.length} dòng`;
+      badge.classList.remove('hidden');
+
+      // Cập nhật tiêu đề cho chế độ in (@media print)
+      document.getElementById('print-sheet-title').textContent =
+        `Bảng Dữ Liệu — Sheet: ${activeSheet.name}`;
+      const nowStr = new Date().toLocaleString('vi-VN', {
+        dateStyle: 'full',
+        timeStyle: 'short',
+      });
+      document.getElementById('print-meta-info').textContent =
+        `Tên file: ${state.fileName} | Tổng số dòng: ${activeSheet.rows.length} | Thời gian in: ${nowStr}`;
+
+      renderDataTable(activeSheet);
+      updateSelectionToolbar(activeSheet);
+    }
+
+    /**
+     * Render danh sách menu điều hướng bên trái theo từng sheet và số dòng
+     */
+    function renderSidebarMenu() {
+      const menuList = document.getElementById('sheet-menu-list');
+      const totalRowsBadge = document.getElementById('sidebar-total-rows-badge');
+
+      const totalRowsAllSheets = state.sheets.reduce((sum, s) => sum + s.rows.length, 0);
+      totalRowsBadge.textContent = `${totalRowsAllSheets} dòng`;
+
+      if (state.sheets.length === 0) {
+        menuList.innerHTML = `
+          <div class="text-center py-10 px-4">
+            <div class="w-11 h-11 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2.5">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <p class="text-xs font-medium text-slate-600">Chưa có sheet nào</p>
+            <p class="text-[11px] text-slate-400 mt-1">Tải file Excel hoặc tạo dữ liệu mẫu để sinh menu sheet tự động.</p>
+          </div>
+        `;
+        return;
+      }
+
+      menuList.innerHTML = state.sheets
+        .map((sheet, index) => {
+          const isActive = sheet.name === state.activeSheetName;
+          const activeClasses = isActive
+            ? 'bg-brand-50 text-brand-700 border-brand-200 font-semibold shadow-2xs'
+            : 'text-slate-700 hover:bg-slate-100 border-transparent font-medium';
+          const countBadgeClasses = isActive
+            ? 'bg-brand-600 text-white'
+            : 'bg-slate-100 text-slate-600';
+
+          return `
+            <button
+              type="button"
+              onclick="selectSheetByIndex(${index})"
+              class="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border text-left text-sm transition cursor-pointer ${activeClasses}"
+              aria-current="${isActive ? 'page' : 'false'}"
+            >
+              <span class="flex items-center gap-2.5 min-w-0">
+                <span class="w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-brand-600' : 'bg-slate-300'}"></span>
+                <span class="truncate" title="${escapeHtml(sheet.name)}">${escapeHtml(sheet.name)}</span>
+              </span>
+              <span class="shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums ${countBadgeClasses}">
+                ${sheet.rows.length}
+              </span>
+            </button>
+          `;
+        })
+        .join('');
+    }
+
+    function selectSheetByIndex(index) {
+      if (state.sheets[index]) {
+        selectSheet(state.sheets[index].name);
+      }
+    }
+
+    /**
+     * Render tiêu đề cột và các dòng dữ liệu của sheet đang chọn
+     */
+    function renderDataTable(sheet) {
+      const thead = document.getElementById('sheet-table-head');
+      const tbody = document.getElementById('sheet-table-body');
+      const emptyState = document.getElementById('empty-table-state');
+      const emptyTitle = document.getElementById('empty-table-title');
+      const emptyDesc = document.getElementById('empty-table-desc');
+      const tableEl = document.getElementById('sheet-data-table');
+
+      const filteredRows = getFilteredRows(sheet);
+
+      // Cập nhật bộ đếm thống kê
+      document.getElementById('filtered-count-label').textContent = filteredRows.length;
+      document.getElementById('total-sheet-rows-label').textContent = sheet.rows.length;
+      document.getElementById('total-sheet-cols-label').textContent = sheet.columns.length;
+
+      // Kiểm tra trạng thái "chọn tất cả"
+      const allFilteredSelected =
+        filteredRows.length > 0 && filteredRows.every((r) => state.selectedRowIds.has(r._id));
+
+      // Render phần thead
+      thead.innerHTML = `
+        <tr>
+          <th class="col-select w-11 px-3 py-3 text-center">
+            <input
+              type="checkbox"
+              id="select-all-checkbox"
+              onchange="toggleSelectAllRows(this.checked)"
+              ${allFilteredSelected ? 'checked' : ''}
+              class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+              title="Chọn tất cả dòng đang hiển thị"
+            />
+          </th>
+          <th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 w-14 text-center">#</th>
+          ${sheet.columns
+            .map(
+              (col) => `
+                <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-600 whitespace-nowrap">
+                  ${escapeHtml(col)}
+                </th>
+              `
+            )
+            .join('')}
+          <th class="col-actions px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-600 text-right sticky right-0 bg-slate-50 border-l border-slate-200 whitespace-nowrap">
+            Thao tác
+          </th>
+        </tr>
+      `;
+
+      // Nếu không có dòng nào sau khi lọc
+      if (filteredRows.length === 0) {
+        tbody.innerHTML = '';
+        tableEl.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+
+        if (state.searchQuery.trim() !== '') {
+          emptyTitle.textContent = `Không tìm thấy dòng nào khớp với "${state.searchQuery.trim()}"`;
+          emptyDesc.textContent = 'Thử nhập từ khoá khác hoặc xoá bộ lọc tìm kiếm để xem toàn bộ dòng.';
+        } else {
+          emptyTitle.textContent = `Sheet "${sheet.name}" chưa có dòng dữ liệu`;
+          emptyDesc.textContent = 'Nhấn nút "Thêm dòng mới" phía trên để thêm bản ghi đầu tiên.';
+        }
+        return;
+      }
+
+      tableEl.classList.remove('hidden');
+      emptyState.classList.add('hidden');
+
+      // Render từng dòng dữ liệu
+      tbody.innerHTML = filteredRows
+        .map((row, idx) => {
+          const isChecked = state.selectedRowIds.has(row._id);
+          const rowHighlight = isChecked ? 'bg-brand-50/50' : 'hover:bg-slate-50/90';
+
+          const cellsHtml = sheet.columns
+            .map((col) => {
+              const val = row.values[col] ?? '';
+              return `<td class="px-4 py-2.5 text-slate-700 max-w-xs truncate" title="${escapeHtml(val)}">${highlightMatch(val, state.searchQuery)}</td>`;
+            })
+            .join('');
+
+          return `
+            <tr class="${rowHighlight} transition-colors">
+              <td class="col-select px-3 py-2.5 text-center">
+                <input
+                  type="checkbox"
+                  onchange="toggleSingleRowSelection(${row._id}, this.checked)"
+                  ${isChecked ? 'checked' : ''}
+                  class="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+                  aria-label="Chọn dòng ${idx + 1}"
+                />
+              </td>
+              <td class="px-3 py-2.5 text-xs font-medium text-slate-400 text-center tabular-nums">${idx + 1}</td>
+              ${cellsHtml}
+              <td class="col-actions px-3 py-2 text-right sticky right-0 bg-white border-l border-slate-100 whitespace-nowrap">
+                <div class="inline-flex items-center gap-1">
+                  <button
+                    type="button"
+                    onclick="openEditRowModal(${row._id})"
+                    class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 transition cursor-pointer"
+                    title="Sửa dòng này"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <span>Sửa</span>
+                  </button>
+                  <button
+                    type="button"
+                    onclick="confirmDeleteSingleRow(${row._id}, ${idx + 1})"
+                    class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 transition cursor-pointer"
+                    title="Xoá dòng này"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    <span>Xoá</span>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          `;
+        })
+        .join('');
+    }
+
+    /* -------------------- TÌM KIẾM & CHỌN NHIỀU DÒNG -------------------- */
+    function handleSearchChange(value) {
+      state.searchQuery = value;
+      updateClearSearchButton();
+      const sheet = getActiveSheet();
+      if (sheet) {
+        renderDataTable(sheet);
+      }
+    }
+
+    function clearSearch() {
+      const input = document.getElementById('search-input');
+      if (input) input.value = '';
+      handleSearchChange('');
+    }
+
+    function updateClearSearchButton() {
+      const btn = document.getElementById('clear-search-btn');
+      if (!btn) return;
+      if (state.searchQuery.trim().length > 0) {
+        btn.classList.remove('hidden');
+      } else {
+        btn.classList.add('hidden');
+      }
+    }
+
+    function toggleSingleRowSelection(rowId, checked) {
+      if (checked) {
+        state.selectedRowIds.add(rowId);
+      } else {
+        state.selectedRowIds.delete(rowId);
+      }
+      const sheet = getActiveSheet();
+      if (sheet) {
+        updateSelectionToolbar(sheet);
+        renderDataTable(sheet);
+      }
+    }
+
+    function toggleSelectAllRows(checked) {
+      const sheet = getActiveSheet();
+      if (!sheet) return;
+      const filteredRows = getFilteredRows(sheet);
+
+      if (checked) {
+        filteredRows.forEach((r) => state.selectedRowIds.add(r._id));
+      } else {
+        filteredRows.forEach((r) => state.selectedRowIds.delete(r._id));
+      }
+
+      updateSelectionToolbar(sheet);
+      renderDataTable(sheet);
+    }
+
+    function updateSelectionToolbar(sheet) {
+      // Lọc bỏ các ID không còn tồn tại trong sheet hiện tại
+      const validIds = new Set(sheet.rows.map((r) => r._id));
+      for (const id of Array.from(state.selectedRowIds)) {
+        if (!validIds.has(id)) {
+          state.selectedRowIds.delete(id);
+        }
+      }
+
+      const count = state.selectedRowIds.size;
+      const btnDeleteSelected = document.getElementById('btn-delete-selected');
+      const countLabel = document.getElementById('selected-count-label');
+
+      countLabel.textContent = count;
+      btnDeleteSelected.disabled = count === 0;
+    }
+
+    /* -------------------- CHỨC NĂNG THÊM / SỬA DÒNG & THÊM CỘT -------------------- */
+    function openCreateRowModal() {
+      const sheet = getActiveSheet();
+      if (!sheet) return;
+
+      state.modalState = { mode: 'create-row', targetRowId: null };
+      document.getElementById('crud-modal-title').textContent = `Thêm dòng mới — ${sheet.name}`;
+      document.getElementById('crud-modal-subtitle').textContent =
+        'Nhập giá trị cho các cột tương ứng của sheet hiện tại.';
+      document.getElementById('crud-modal-submit-btn').textContent = 'Thêm dòng';
+
+      const fieldsContainer = document.getElementById('crud-modal-fields');
+      fieldsContainer.innerHTML = sheet.columns
+        .map((col, idx) => {
+          const inputId = `field-col-${idx}`;
+          return `
+            <div class="${sheet.columns.length === 1 ? 'sm:col-span-2' : ''}">
+              <label for="${inputId}" class="block text-xs font-semibold text-slate-700 mb-1">
+                ${escapeHtml(col)}
+              </label>
+              <input
+                type="text"
+                id="${inputId}"
+                data-col="${escapeAttr(col)}"
+                placeholder="Nhập ${escapeAttr(col)}..."
+                class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 text-sm text-slate-800 outline-none transition"
+              />
+            </div>
+          `;
+        })
+        .join('');
+
+      openCrudModal();
+      const firstInput = fieldsContainer.querySelector('input');
+      if (firstInput) setTimeout(() => firstInput.focus(), 50);
+    }
+
+    function openEditRowModal(rowId) {
+      const sheet = getActiveSheet();
+      if (!sheet) return;
+
+      const row = sheet.rows.find((r) => r._id === rowId);
+      if (!row) return;
+
+      state.modalState = { mode: 'edit-row', targetRowId: rowId };
+      document.getElementById('crud-modal-title').textContent = `Chỉnh sửa dòng — ${sheet.name}`;
+      document.getElementById('crud-modal-subtitle').textContent =
+        'Cập nhật nội dung các cột và nhấn "Lưu thay đổi".';
+      document.getElementById('crud-modal-submit-btn').textContent = 'Lưu thay đổi';
+
+      const fieldsContainer = document.getElementById('crud-modal-fields');
+      fieldsContainer.innerHTML = sheet.columns
+        .map((col, idx) => {
+          const inputId = `field-col-${idx}`;
+          const currentVal = row.values[col] ?? '';
+          return `
+            <div class="${sheet.columns.length === 1 ? 'sm:col-span-2' : ''}">
+              <label for="${inputId}" class="block text-xs font-semibold text-slate-700 mb-1">
+                ${escapeHtml(col)}
+              </label>
+              <input
+                type="text"
+                id="${inputId}"
+                data-col="${escapeAttr(col)}"
+                value="${escapeAttr(currentVal)}"
+                class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 text-sm text-slate-800 outline-none transition"
+              />
+            </div>
+          `;
+        })
+        .join('');
+
+      openCrudModal();
+      const firstInput = fieldsContainer.querySelector('input');
+      if (firstInput) setTimeout(() => firstInput.focus(), 50);
+    }
+
+    function openAddColumnModal() {
+      const sheet = getActiveSheet();
+      if (!sheet) return;
+
+      state.modalState = { mode: 'add-column', targetRowId: null };
+      document.getElementById('crud-modal-title').textContent = `Thêm cột mới — ${sheet.name}`;
+      document.getElementById('crud-modal-subtitle').textContent =
+        'Cột mới sẽ được thêm vào cuối bảng và áp dụng cho tất cả các dòng hiện có.';
+      document.getElementById('crud-modal-submit-btn').textContent = 'Tạo cột';
+
+      const fieldsContainer = document.getElementById('crud-modal-fields');
+      fieldsContainer.innerHTML = `
+        <div class="sm:col-span-2">
+          <label for="new-column-name-input" class="block text-xs font-semibold text-slate-700 mb-1">
+            Tên cột tiêu đề
+          </label>
+          <input
+            type="text"
+            id="new-column-name-input"
+            placeholder="Ví dụ: Ghi chú, Ngày cập nhật, Đơn vị..."
+            required
+            class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 text-sm text-slate-800 outline-none transition"
+          />
+        </div>
+        <div class="sm:col-span-2">
+          <label for="new-column-default-input" class="block text-xs font-semibold text-slate-700 mb-1">
+            Giá trị mặc định cho các dòng hiện tại (tuỳ chọn)
+          </label>
+          <input
+            type="text"
+            id="new-column-default-input"
+            placeholder="Để trống nếu muốn nhập sau..."
+            class="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15 text-sm text-slate-800 outline-none transition"
+          />
+        </div>
+      `;
+
+      openCrudModal();
+      setTimeout(() => {
+        const el = document.getElementById('new-column-name-input');
+        if (el) el.focus();
+      }, 50);
+    }
+
+    function handleCrudFormSubmit(event) {
+      event.preventDefault();
+      const sheet = getActiveSheet();
+      if (!sheet) return;
+
+      const { mode, targetRowId } = state.modalState;
+
+      if (mode === 'create-row') {
+        const inputs = document.querySelectorAll('#crud-modal-fields input[data-col]');
+        const newValues = {};
+        inputs.forEach((inp) => {
+          const colName = inp.getAttribute('data-col');
+          newValues[colName] = inp.value;
+        });
+
+        sheet.rows.push({
+          _id: state.rowIdCounter++,
+          values: newValues,
+        });
+
+        closeCrudModal();
+        renderAllUI();
+        showToast(`Đã thêm 1 dòng mới vào sheet "${sheet.name}".`, 'success');
+        return;
+      }
+
+      if (mode === 'edit-row') {
+        const row = sheet.rows.find((r) => r._id === targetRowId);
+        if (!row) {
+          closeCrudModal();
+          return;
+        }
+
+        const inputs = document.querySelectorAll('#crud-modal-fields input[data-col]');
+        inputs.forEach((inp) => {
+          const colName = inp.getAttribute('data-col');
+          row.values[colName] = inp.value;
+        });
+
+        closeCrudModal();
+        renderAllUI();
+        showToast(`Đã cập nhật dữ liệu dòng trong sheet "${sheet.name}".`, 'success');
+        return;
+      }
+
+      if (mode === 'add-column') {
+        const colNameInput = document.getElementById('new-column-name-input');
+        const defaultInput = document.getElementById('new-column-default-input');
+        const colName = colNameInput ? colNameInput.value.trim() : '';
+        const defaultVal = defaultInput ? defaultInput.value : '';
+
+        if (!colName) {
+          showToast('Vui lòng nhập tên cột tiêu đề.', 'warning');
+          return;
+        }
+
+        if (sheet.columns.includes(colName)) {
+          showToast(`Cột "${colName}" đã tồn tại trong sheet "${sheet.name}".`, 'warning');
+          return;
+        }
+
+        sheet.columns.push(colName);
+        sheet.rows.forEach((r) => {
+          r.values[colName] = defaultVal;
+        });
+
+        closeCrudModal();
+        renderAllUI();
+        showToast(`Đã thêm cột "${colName}" vào sheet "${sheet.name}".`, 'success');
+      }
+    }
+
+    function openCrudModal() {
+      const modal = document.getElementById('crud-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeCrudModal() {
+      const modal = document.getElementById('crud-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      state.modalState = { mode: null, targetRowId: null };
+    }
+
+    /* -------------------- CHỨC NĂNG XOÁ DÒNG (ĐƠN LẺ & HÀNG LOẠT) -------------------- */
+    function confirmDeleteSingleRow(rowId, displayIndex) {
+      const sheet = getActiveSheet();
+      if (!sheet) return;
+
+      openConfirmModal({
+        title: 'Xoá dòng dữ liệu?',
+        message: `Bạn có chắc chắn muốn xoá dòng số #${displayIndex} khỏi sheet "${sheet.name}" không? Hành động này sẽ cập nhật lại số lượng dòng trên menu.`,
+        confirmText: 'Xoá dòng',
+        onConfirm: () => {
+          sheet.rows = sheet.rows.filter((r) => r._id !== rowId);
+          state.selectedRowIds.delete(rowId);
+          renderAllUI();
+          showToast(`Đã xoá dòng #${displayIndex} khỏi sheet "${sheet.name}".`, 'success');
+        },
+      });
+    }
+
+    function confirmDeleteSelectedRows() {
+      const sheet = getActiveSheet();
+      if (!sheet || state.selectedRowIds.size === 0) return;
+
+      const count = state.selectedRowIds.size;
+      openConfirmModal({
+        title: `Xoá ${count} dòng đã chọn?`,
+        message: `Bạn chuẩn bị xoá ${count} dòng dữ liệu đã chọn trong sheet "${sheet.name}". Bạn có muốn tiếp tục không?`,
+        confirmText: `Xoá ${count} dòng`,
+        onConfirm: () => {
+          sheet.rows = sheet.rows.filter((r) => !state.selectedRowIds.has(r._id));
+          state.selectedRowIds.clear();
+          renderAllUI();
+          showToast(`Đã xoá ${count} dòng khỏi sheet "${sheet.name}".`, 'success');
+        },
+      });
+    }
+
+    function openConfirmModal({ title, message, confirmText, onConfirm }) {
+      document.getElementById('confirm-modal-title').textContent = title;
+      document.getElementById('confirm-modal-message').textContent = message;
+      document.getElementById('confirm-modal-action-btn').textContent = confirmText || 'Xác nhận';
+      state.pendingConfirmCallback = onConfirm;
+
+      const modal = document.getElementById('confirm-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeConfirmModal() {
+      const modal = document.getElementById('confirm-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      state.pendingConfirmCallback = null;
+    }
+
+    // Gắn sự kiện click nút xác nhận trong modal xoá
+    document.addEventListener('DOMContentLoaded', () => {
+      const actionBtn = document.getElementById('confirm-modal-action-btn');
+      if (actionBtn) {
+        actionBtn.addEventListener('click', () => {
+          const cb = state.pendingConfirmCallback;
+          closeConfirmModal();
+          if (typeof cb === 'function') {
+            cb();
+          }
+        });
+      }
+    });
+
+    /* -------------------- CHỨC NĂNG IN DỮ LIỆU & XUẤT EXCEL -------------------- */
+    function printCurrentSheet() {
+      const sheet = getActiveSheet();
+      if (!sheet) {
+        showToast('Vui lòng chọn một sheet trước khi in.', 'warning');
+        return;
+      }
+
+      // Cập nhật lại thông tin thời điểm in ngay trước khi mở hộp thoại in của trình duyệt
+      const nowStr = new Date().toLocaleString('vi-VN', {
+        dateStyle: 'full',
+        timeStyle: 'short',
+      });
+      document.getElementById('print-sheet-title').textContent = `Bảng Dữ Liệu — Sheet: ${sheet.name}`;
+      document.getElementById('print-meta-info').textContent =
+        `Tên file: ${state.fileName} | Đang hiển thị: ${getFilteredRows(sheet).length}/${sheet.rows.length} dòng | Thời gian in: ${nowStr}`;
+
+      window.print();
+    }
+
+    function exportWorkbookToExcel() {
+      if (typeof XLSX === 'undefined') {
+        showToast('Thư viện SheetJS chưa sẵn sàng để xuất file.', 'error');
+        return;
+      }
+
+      if (state.sheets.length === 0) {
+        showToast('Không có dữ liệu nào để xuất ra file Excel.', 'warning');
+        return;
+      }
+
+      try {
+        const outWorkbook = XLSX.utils.book_new();
+
+        state.sheets.forEach((sheet) => {
+          // Chuyển đổi từng sheet thành mảng các object theo đúng tên cột để ghi ra Excel
+          const plainObjects = sheet.rows.map((row) => {
+            const obj = {};
+            sheet.columns.forEach((col) => {
+              obj[col] = row.values[col] ?? '';
+            });
+            return obj;
+          });
+
+          const worksheet = XLSX.utils.json_to_sheet(plainObjects, { header: sheet.columns });
+          // Đặt độ rộng cột tự động tương đối để file Excel mở lên dễ đọc
+          worksheet['!cols'] = sheet.columns.map((col) => {
+            const maxLen = plainObjects.reduce(
+              (m, item) => Math.max(m, String(item[col] ?? '').length),
+              col.length
+            );
+            return { wch: Math.min(Math.max(maxLen + 4, 12), 45) };
+          });
+
+          // Tên sheet tối đa 31 ký tự theo chuẩn Excel
+          const safeSheetName = sheet.name.slice(0, 31) || 'Sheet';
+          XLSX.utils.book_append_sheet(outWorkbook, worksheet, safeSheetName);
+        });
+
+        const baseName = (state.fileName || 'du_lieu_excel').replace(/\.(xlsx|xls|csv)$/i, '');
+        const outputFileName = `${baseName}_da_cap_nhat.xlsx`;
+        XLSX.writeFile(outWorkbook, outputFileName);
+        showToast(`Đã xuất file "${outputFileName}" gồm ${state.sheets.length} sheet.`, 'success');
+      } catch (err) {
+        console.error('Lỗi xuất file Excel:', err);
+        showToast('Có lỗi xảy ra khi xuất file Excel.', 'error');
+      }
+    }
+
+    /* -------------------- HÀM HỖ TRỢ AN TOÀN HTML & TÔ SÁNG TỪ KHOÁ -------------------- */
+    function escapeHtml(text) {
+      return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function escapeAttr(text) {
+      return escapeHtml(text).replace(/`/g, '&#96;');
+    }
+
+    function highlightMatch(text, query) {
+      const str = String(text ?? '');
+      const trimmed = query.trim();
+      if (!trimmed) return escapeHtml(str);
+
+      const escapedQuery = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(${escapedQuery})`, 'gi');
+      const parts = str.split(regex);
+
+      return parts
+        .map((part) => {
+          if (part.toLowerCase() === trimmed.toLowerCase()) {
+            return `<mark class="bg-amber-200/80 text-slate-900 rounded-xs px-0.5">${escapeHtml(part)}</mark>`;
+          }
+          return escapeHtml(part);
+        })
+        .join('');
+    }
+  </script>
+</body>
+</html>
